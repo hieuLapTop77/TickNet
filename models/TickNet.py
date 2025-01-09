@@ -77,26 +77,28 @@ class GroupedBottleneck(torch.nn.Module):
         self.groups = groups
         # Convolution 1x1 để giảm số kênh từ 512 -> 64 (nhóm theo groups)
         self.conv1 = torch.nn.Conv2d(in_channels, out_channels // 2, kernel_size=1, groups=groups)
+        self.bn1 = torch.nn.BatchNorm2d(out_channels // 2)  # BatchNorm cho conv1
         # Convolution 3x3 để xử lý thông tin (nhóm theo groups)
         self.conv2 = torch.nn.Conv2d(out_channels // 2, out_channels // 2, kernel_size=3, stride=1, padding=1, groups=groups)
+        self.bn2 = torch.nn.BatchNorm2d(out_channels // 2)  # BatchNorm cho conv2
         # Convolution 1x1 để tăng số kênh từ 64 -> 128 (nhóm theo groups)
         self.conv3 = torch.nn.Conv2d(out_channels // 2, out_channels, kernel_size=1, groups=groups)
-        self.bn = torch.nn.BatchNorm2d(out_channels)  # Batch normalization
+        self.bn3 = torch.nn.BatchNorm2d(out_channels)  # BatchNorm cho conv3
         self.relu = torch.nn.ReLU(inplace=True)  # Activation
 
     def forward(self, x):
         residual = x  # Lưu thông tin gốc
         # Giảm số kênh từ 512 -> 64
         x = self.conv1(x)
-        x = self.bn(x)
+        x = self.bn1(x)
         x = self.relu(x)
         # Xử lý thông tin với convolution 3x3
         x = self.conv2(x)
-        x = self.bn(x)
+        x = self.bn2(x)
         x = self.relu(x)
         # Tăng số kênh từ 64 -> 128
         x = self.conv3(x)
-        x = self.bn(x)
+        x = self.bn3(x)
         # Kết hợp với thông tin gốc (skip connection)
         if residual.shape == x.shape:  # Chỉ cộng nếu kích thước khớp
             x = x + residual
