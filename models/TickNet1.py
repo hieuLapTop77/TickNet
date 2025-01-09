@@ -23,8 +23,8 @@ class FR_PDP_block(torch.nn.Module):
                                 activation=None)
         self.Dw = conv3x3_dw_blockAll(channels=in_channels, stride=stride)         
         self.Pw2 = conv1x1_block(in_channels=in_channels,
-                                             out_channels=out_channels,                                             
-                                             groups=1)
+                                out_channels=out_channels,                                             
+                                groups=1)
         self.PwR = conv1x1_block(in_channels=in_channels,
                                 out_channels=out_channels,
                                 stride=stride)
@@ -33,16 +33,22 @@ class FR_PDP_block(torch.nn.Module):
         self.out_channels = out_channels
         self.SE = SE(out_channels, 16)
         
-        if in_channels == 512 and out_channels == 128:
-            self.bottleneck = MobileBottleneck(in_channels=512, out_channels=128)
+        # Thay đổi điều kiện này
+        # if in_channels == 512 and out_channels == 128:
+        if use_bottleneck:
+            self.bottleneck = MobileBottleneck(
+                in_channels=in_channels,  # sử dụng số channels thực tế
+                out_channels=out_channels
+            )
           
     def forward(self, x):
         residual = x
         x = self.Pw1(x)
         x = self.Dw(x)
         x = self.Pw2(x)
-        # Áp dụng MobileBottleneck nếu có
-        if hasattr(self, 'bottleneck'):
+        
+        # Áp dụng MobileBottleneck chỉ khi use_bottleneck=True
+        if self.use_bottleneck:
             x = self.bottleneck(x)
 
         x = self.SE(x)
