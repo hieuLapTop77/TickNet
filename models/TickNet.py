@@ -34,10 +34,12 @@ class FR_PDP_block(torch.nn.Module):
         self.SE = SE(out_channels, 16)
         
         if use_bottleneck:
-            bottleneck_channels = 64  
-            self.bottleneck = Bottleneck(in_channels=512, 
-                                        bottleneck_channels=64,  
-                                        out_channels=128) 
+            # bottleneck_channels = 64  
+            # self.bottleneck = Bottleneck(in_channels=512, 
+            #                             bottleneck_channels=64,  
+            #                             out_channels=128) 
+            self.bottleneck = GroupedBottleneck(in_channels=512, out_channels=128, groups=4)
+            
     def forward(self, x):
         residual = x
         x = self.Pw1(x)        
@@ -68,6 +70,38 @@ class Bottleneck(nn.Module):
         out = self.relu(out)
         out = self.bn2(self.conv2(out))
         return out
+
+class GroupedBottleneck(torch.nn.Module):
+    def __init__(self, in_channels, out_channels, groups=4):
+        super().__init__()
+        self.groups = groups
+        # Convolution 1x1 để giảm số kênh từ 512 -> 64 (nhóm theo groups)
+        self.conv1 = torch.nn.Conv2d(in_channels, out_channels // 2, kernel_size=1, groups=groups)
+        # Convolution 3x3 để xử lý thông tin (nhóm theo groups)
+        self.conv2 = torch.nn.Conv2d(out_channels // 2, out_channels // 2, kernel_size=3, stride=1, padding=1, groups=groups)
+        # Convolution 1x1 để tăng số kênh từ 64 -> 128 (nhóm theo groups)
+        self.conv3 = torch.nn.Conv2d(out_channels // 2, out_channels, kernel_size=1, groups=groups)
+        self.bn = torch.nn.BatchNorm2d(out_channels)  # Batch normalization
+        self.relu = torch.nn.ReLU(inplace=True)  # Activation
+
+    def forward(self, x):
+        residual = x  # Lưu thông tin gốc
+        # Giảm số kênh từ 512 -> 64
+        x = self.conv1(x)
+        x = self.bn(x)
+        x = self.relu(x)
+        # Xử lý thông tin với convolution 3x3
+        x = self.conv2(x)
+        x = self.bn(x)
+        x = self.relu(x)
+        # Tăng số kênh từ 64 -> 128
+        x = self.conv3(x)
+        x = self.bn(x)
+        # Kết hợp với thông tin gốc (skip connection)
+        if residual.shape == x.shape:  # Chỉ cộng nếu kích thước khớp
+            x = x + residual
+        x = self.relu(x)
+        return x
         
 class TickNet(torch.nn.Module):
     """
