@@ -38,7 +38,8 @@ class FR_PDP_block(torch.nn.Module):
             # self.bottleneck = Bottleneck(in_channels=512, 
             #                             bottleneck_channels=64,  
             #                             out_channels=128) 
-            self.bottleneck = GroupedBottleneck(in_channels=512, out_channels=128, groups=4)
+            # self.bottleneck = GroupedBottleneck(in_channels=512, out_channels=128, groups=4)
+            self.bottleneck = MobileNetBottleneck(in_channels=512, out_channels=128)
             
     def forward(self, x):
         residual = x
@@ -98,6 +99,39 @@ class GroupedBottleneck(torch.nn.Module):
         x = self.relu(x)
         # Tăng số kênh từ 64 -> 128
         x = self.conv3(x)
+        x = self.bn3(x)
+        # Kết hợp với thông tin gốc (skip connection)
+        if residual.shape == x.shape:  # Chỉ cộng nếu kích thước khớp
+            x = x + residual
+        x = self.relu(x)
+        return x
+
+class MobileNetBottleneck(torch.nn.Module):
+    def __init__(self, in_channels, out_channels):
+        super().__init__()
+        # Pointwise Convolution để giảm số kênh từ 512 -> 64
+        self.pw1 = torch.nn.Conv2d(in_channels, out_channels // 2, kernel_size=1)
+        self.bn1 = torch.nn.BatchNorm2d(out_channels // 2)  # BatchNorm cho pw1
+        # Depthwise Convolution để xử lý thông tin
+        self.dw = torch.nn.Conv2d(out_channels // 2, out_channels // 2, kernel_size=3, stride=1, padding=1, groups=out_channels // 2)
+        self.bn2 = torch.nn.BatchNorm2d(out_channels // 2)  # BatchNorm cho dw
+        # Pointwise Convolution để tăng số kênh từ 64 -> 128
+        self.pw2 = torch.nn.Conv2d(out_channels // 2, out_channels, kernel_size=1)
+        self.bn3 = torch.nn.BatchNorm2d(out_channels)  # BatchNorm cho pw2
+        self.relu = torch.nn.ReLU(inplace=True)  # Activation
+
+    def forward(self, x):
+        residual = x  # Lưu thông tin gốc
+        # Giảm số kênh từ 512 -> 64
+        x = self.pw1(x)
+        x = self.bn1(x)
+        x = self.relu(x)
+        # Xử lý thông tin với Depthwise Convolution
+        x = self.dw(x)
+        x = self.bn2(x)
+        x = self.relu(x)
+        # Tăng số kênh từ 64 -> 128
+        x = self.pw2(x)
         x = self.bn3(x)
         # Kết hợp với thông tin gốc (skip connection)
         if residual.shape == x.shape:  # Chỉ cộng nếu kích thước khớp
