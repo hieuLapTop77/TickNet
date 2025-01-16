@@ -35,11 +35,11 @@ class FR_PDP_block(torch.nn.Module):
         
         if use_bottleneck:
             # bottleneck_channels = 64  
-            # self.bottleneck = Bottleneck(in_channels=512, 
-            #                             bottleneck_channels=64,  
-            #                             out_channels=128) 
+            self.bottleneck = Bottleneck(in_channels=512, 
+                                        bottleneck_channels=64,  
+                                        out_channels=128) 
             # self.bottleneck = GroupedBottleneck(in_channels=512, out_channels=128, groups=4)
-            self.bottleneck = MobileNetBottleneck(in_channels=512, out_channels=128)
+            # self.bottleneck = MobileNetBottleneck(in_channels=512, out_channels=128)
             
     def forward(self, x):
         residual = x
