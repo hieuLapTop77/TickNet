@@ -164,7 +164,7 @@ def main():
     # print model with parameter and FLOPs counts    
     torch.autograd.set_detect_anomaly(True)     
     
-    arr_typesize = ['large']
+    arr_typesize = ['small']
     # arr_typesize = ['small']
     for typesize in arr_typesize:    
         strmode = 'StanfordDogs_TickNet_' + typesize + '_SE'  
