@@ -13,8 +13,7 @@ class FR_PDP_block(torch.nn.Module):
     def __init__(self,
                  in_channels,
                  out_channels,
-                 stride,
-                 use_bottleneck=False):
+                 stride):
         super().__init__()
         self.use_bottleneck = use_bottleneck
         self.Pw1 = conv1x1_block(in_channels=in_channels,
@@ -32,15 +31,6 @@ class FR_PDP_block(torch.nn.Module):
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.SE = SE(out_channels, 16)
-        
-        if use_bottleneck:
-            # bottleneck_channels = 64  
-            self.bottleneck = Bottleneck(in_channels=512, 
-                                        bottleneck_channels=256,  
-                                        out_channels=128) 
-            # self.bottleneck = GroupedBottleneck(in_channels=512, out_channels=128, groups=4)
-            # self.bottleneck = MobileNetBottleneck(in_channels=512, out_channels=128)
-            
     def forward(self, x):
         residual = x
         x = self.Pw1(x)        
@@ -49,11 +39,8 @@ class FR_PDP_block(torch.nn.Module):
         x = self.SE(x)
         if self.stride == 1 and self.in_channels == self.out_channels:
             x = x + residual
-        else:            
-            if self.use_bottleneck and self.in_channels > self.out_channels:
-                residual = self.bottleneck(residual)
-            else:            
-                residual = self.PwR(residual)
+        else:                     
+            residual = self.PwR(residual)
             x = x + residual
         return x
         
@@ -72,72 +59,62 @@ class Bottleneck(nn.Module):
         out = self.bn2(self.conv2(out))
         return out
 
-class GroupedBottleneck(torch.nn.Module):
-    def __init__(self, in_channels, out_channels, groups=4):
-        super().__init__()
-        self.groups = groups
-        # Convolution 1x1 để giảm số kênh từ 512 -> 64 (nhóm theo groups)
-        self.conv1 = torch.nn.Conv2d(in_channels, out_channels // 2, kernel_size=1, groups=groups)
-        self.bn1 = torch.nn.BatchNorm2d(out_channels // 2)  # BatchNorm cho conv1
-        # Convolution 3x3 để xử lý thông tin (nhóm theo groups)
-        self.conv2 = torch.nn.Conv2d(out_channels // 2, out_channels // 2, kernel_size=3, stride=1, padding=1, groups=groups)
-        self.bn2 = torch.nn.BatchNorm2d(out_channels // 2)  # BatchNorm cho conv2
-        # Convolution 1x1 để tăng số kênh từ 64 -> 128 (nhóm theo groups)
-        self.conv3 = torch.nn.Conv2d(out_channels // 2, out_channels, kernel_size=1, groups=groups)
-        self.bn3 = torch.nn.BatchNorm2d(out_channels)  # BatchNorm cho conv3
-        self.relu = torch.nn.ReLU(inplace=True)  # Activation
-
+class BottleneckSE(nn.Module):
+    def __init__(self, in_channels, expansion_factor, out_channels, stride=1, se_ratio=16):
+        """
+        :param in_channels: Số channel đầu vào (ví dụ 512)
+        :param expansion_factor: Hệ số mở rộng (ví dụ 0.5 để chuyển 512->256 nếu cần mở rộng hay giảm)
+        :param out_channels: Số channel đầu ra (ví dụ 128)
+        :param stride: Stride của depthwise convolution (mặc định 1)
+        :param se_ratio: Hệ số giảm của SE block (mặc định 16)
+        """
+        super(BottleneckSE, self).__init__()
+        mid_channels = int(in_channels * expansion_factor)
+        
+        # Phần mở rộng: Pointwise convolution
+        self.expand = nn.Sequential(
+            nn.Conv2d(in_channels, mid_channels, kernel_size=1, bias=False),
+            nn.BatchNorm2d(mid_channels),
+            nn.ReLU(inplace=True)
+        )
+        
+        # Depthwise convolution: xử lý thông tin không gian trên từng channel riêng biệt
+        self.depthwise = nn.Sequential(
+            nn.Conv2d(mid_channels, mid_channels, kernel_size=3, stride=stride,
+                      padding=1, groups=mid_channels, bias=False),
+            nn.BatchNorm2d(mid_channels),
+            nn.ReLU(inplace=True)
+        )
+        
+        # Giảm số channel: Pointwise convolution để tạo bottleneck
+        self.project = nn.Sequential(
+            nn.Conv2d(mid_channels, out_channels, kernel_size=1, bias=False),
+            nn.BatchNorm2d(out_channels)
+        )
+        
+        # Thêm SE block sau phần project
+        self.se = SE(out_channels, se_ratio)
+        
+        # Shortcut (nếu điều kiện kích thước thỏa mãn)
+        self.use_shortcut = (stride == 1 and in_channels == out_channels)
+        if not self.use_shortcut:
+            self.shortcut = nn.Sequential(
+                nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=stride, bias=False),
+                nn.BatchNorm2d(out_channels)
+            )
+    
     def forward(self, x):
-        residual = x  # Lưu thông tin gốc
-        # Giảm số kênh từ 512 -> 64
-        x = self.conv1(x)
-        x = self.bn1(x)
-        x = self.relu(x)
-        # Xử lý thông tin với convolution 3x3
-        x = self.conv2(x)
-        x = self.bn2(x)
-        x = self.relu(x)
-        # Tăng số kênh từ 64 -> 128
-        x = self.conv3(x)
-        x = self.bn3(x)
-        # Kết hợp với thông tin gốc (skip connection)
-        if residual.shape == x.shape:  # Chỉ cộng nếu kích thước khớp
-            x = x + residual
-        x = self.relu(x)
-        return x
+        identity = x
+        out = self.expand(x)
+        out = self.depthwise(out)
+        out = self.project(out)
+        out = self.se(out)  # Áp dụng SE để tái cân bằng các channel
+        if self.use_shortcut:
+            out += identity
+        else:
+            out += self.shortcut(identity)
+        return out
 
-class MobileNetBottleneck(torch.nn.Module):
-    def __init__(self, in_channels, out_channels):
-        super().__init__()
-        # Pointwise Convolution để giảm số kênh từ 512 -> 64
-        self.pw1 = torch.nn.Conv2d(in_channels, out_channels // 2, kernel_size=1)
-        self.bn1 = torch.nn.BatchNorm2d(out_channels // 2)  # BatchNorm cho pw1
-        # Depthwise Convolution để xử lý thông tin
-        self.dw = torch.nn.Conv2d(out_channels // 2, out_channels // 2, kernel_size=3, stride=1, padding=1, groups=out_channels // 2)
-        self.bn2 = torch.nn.BatchNorm2d(out_channels // 2)  # BatchNorm cho dw
-        # Pointwise Convolution để tăng số kênh từ 64 -> 128
-        self.pw2 = torch.nn.Conv2d(out_channels // 2, out_channels, kernel_size=1)
-        self.bn3 = torch.nn.BatchNorm2d(out_channels)  # BatchNorm cho pw2
-        self.relu = torch.nn.ReLU(inplace=True)  # Activation
-
-    def forward(self, x):
-        residual = x  # Lưu thông tin gốc
-        # Giảm số kênh từ 512 -> 64
-        x = self.pw1(x)
-        x = self.bn1(x)
-        x = self.relu(x)
-        # Xử lý thông tin với Depthwise Convolution
-        x = self.dw(x)
-        x = self.bn2(x)
-        x = self.relu(x)
-        # Tăng số kênh từ 64 -> 128
-        x = self.pw2(x)
-        x = self.bn3(x)
-        # Kết hợp với thông tin gốc (skip connection)
-        if residual.shape == x.shape:  # Chỉ cộng nếu kích thước khớp
-            x = x + residual
-        x = self.relu(x)
-        return x
         
 class TickNet(torch.nn.Module):
     """
@@ -171,8 +148,10 @@ class TickNet(torch.nn.Module):
             stage = torch.nn.Sequential()
             for unit_id, unit_channels in enumerate(stage_channels):
                 stride = strides[stage_id] if unit_id == 0 else 1  
-                use_bottleneck = in_channels > unit_channels * 2
-                stage.add_module("unit{}".format(unit_id + 1), FR_PDP_block(in_channels=in_channels, out_channels=unit_channels, stride=stride, use_bottleneck=use_bottleneck))
+                if in_channels == 512 and unit_channels == 128:
+                    stage.add_module("unit{}".format(unit_id + 1), BottleneckSE(in_channels=512, expansion_factor=0.5, out_channels=128, stride=stride, se_ratio=16))
+                else:
+                    stage.add_module("unit{}".format(unit_id + 1), FR_PDP_block(in_channels=in_channels, out_channels=unit_channels, stride=stride))
                 in_channels = unit_channels
             self.backbone.add_module("stage{}".format(stage_id + 1), stage)
         self.final_conv_channels = 1024        
