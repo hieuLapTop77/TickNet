@@ -15,7 +15,6 @@ class FR_PDP_block(torch.nn.Module):
                  out_channels,
                  stride):
         super().__init__()
-        self.use_bottleneck = use_bottleneck
         self.Pw1 = conv1x1_block(in_channels=in_channels,
                                 out_channels=in_channels,                                
                                 use_bn=False,
