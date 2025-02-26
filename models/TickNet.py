@@ -58,62 +58,56 @@ class Bottleneck(nn.Module):
         out = self.bn2(self.conv2(out))
         return out
 
-class BottleneckSE(nn.Module):
+class BottleneckSE_Post(torch.nn.Module):
     def __init__(self, in_channels, expansion_factor, out_channels, stride=1, se_ratio=16):
         """
-        :param in_channels: Số channel đầu vào (ví dụ 512)
-        :param expansion_factor: Hệ số mở rộng (ví dụ 0.5 để chuyển 512->256 nếu cần mở rộng hay giảm)
-        :param out_channels: Số channel đầu ra (ví dụ 128)
-        :param stride: Stride của depthwise convolution (mặc định 1)
-        :param se_ratio: Hệ số giảm của SE block (mặc định 16)
+        :param in_channels: Số channel đầu vào (ví dụ 512).
+        :param expansion_factor: Hệ số mở rộng (ví dụ: 0.5).
+        :param out_channels: Số channel đầu ra (ví dụ: 128).
+        :param stride: Stride của depthwise convolution.
+        :param se_ratio: Hệ số giảm của SE block.
         """
-        super(BottleneckSE, self).__init__()
+        super(BottleneckSE_Post, self).__init__()
         mid_channels = int(in_channels * expansion_factor)
-        
-        # Phần mở rộng: Pointwise convolution
-        self.expand = nn.Sequential(
-            nn.Conv2d(in_channels, mid_channels, kernel_size=1, bias=False),
-            nn.BatchNorm2d(mid_channels),
-            nn.ReLU(inplace=True)
+        # Mở rộng channel
+        self.expand = torch.nn.Sequential(
+            torch.nn.Conv2d(in_channels, mid_channels, kernel_size=1, bias=False),
+            torch.nn.BatchNorm2d(mid_channels),
+            torch.nn.ReLU(inplace=True)
         )
-        
-        # Depthwise convolution: xử lý thông tin không gian trên từng channel riêng biệt
-        self.depthwise = nn.Sequential(
-            nn.Conv2d(mid_channels, mid_channels, kernel_size=3, stride=stride,
-                      padding=1, groups=mid_channels, bias=False),
-            nn.BatchNorm2d(mid_channels),
-            nn.ReLU(inplace=True)
+        # Depthwise convolution
+        self.depthwise = torch.nn.Sequential(
+            torch.nn.Conv2d(mid_channels, mid_channels, kernel_size=3, stride=stride,
+                            padding=1, groups=mid_channels, bias=False),
+            torch.nn.BatchNorm2d(mid_channels),
+            torch.nn.ReLU(inplace=True)
         )
-        
-        # Giảm số channel: Pointwise convolution để tạo bottleneck
-        self.project = nn.Sequential(
-            nn.Conv2d(mid_channels, out_channels, kernel_size=1, bias=False),
-            nn.BatchNorm2d(out_channels)
+        # Giảm số channel
+        self.project = torch.nn.Sequential(
+            torch.nn.Conv2d(mid_channels, out_channels, kernel_size=1, bias=False),
+            torch.nn.BatchNorm2d(out_channels)
         )
-        
-        # Thêm SE block sau phần project
-        self.se = SE(out_channels, se_ratio)
-        
-        # Shortcut (nếu điều kiện kích thước thỏa mãn)
+        # Shortcut branch
         self.use_shortcut = (stride == 1 and in_channels == out_channels)
         if not self.use_shortcut:
-            self.shortcut = nn.Sequential(
-                nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=stride, bias=False),
-                nn.BatchNorm2d(out_channels)
+            self.shortcut = torch.nn.Sequential(
+                torch.nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=stride, bias=False),
+                torch.nn.BatchNorm2d(out_channels)
             )
-    
+        # Áp dụng SE block sau khi cộng shortcut
+        self.se = SE(out_channels, se_ratio)
+        
     def forward(self, x):
         identity = x
         out = self.expand(x)
         out = self.depthwise(out)
         out = self.project(out)
-        out = self.se(out)  # Áp dụng SE để tái cân bằng các channel
         if self.use_shortcut:
             out += identity
         else:
             out += self.shortcut(identity)
+        out = self.se(out)
         return out
-
         
 class TickNet(torch.nn.Module):
     """
@@ -148,7 +142,7 @@ class TickNet(torch.nn.Module):
             for unit_id, unit_channels in enumerate(stage_channels):
                 stride = strides[stage_id] if unit_id == 0 else 1  
                 if in_channels == 512 and unit_channels == 128:
-                    stage.add_module("unit{}".format(unit_id + 1), BottleneckSE(in_channels=512, expansion_factor=0.5, out_channels=128, stride=stride, se_ratio=16))
+                    stage.add_module("unit{}".format(unit_id + 1), BottleneckSE_Post(in_channels=512, expansion_factor=0.5, out_channels=128, stride=stride, se_ratio=16))
                 else:
                     stage.add_module("unit{}".format(unit_id + 1), FR_PDP_block(in_channels=in_channels, out_channels=unit_channels, stride=stride))
                 in_channels = unit_channels
