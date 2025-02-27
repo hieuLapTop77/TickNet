@@ -13,8 +13,10 @@ class FR_PDP_block(torch.nn.Module):
     def __init__(self,
                  in_channels,
                  out_channels,
-                 stride):
+                 stride, survival_prob=0.8):
         super().__init__()
+        self.survival_prob = survival_prob
+        self.stochastic_depth = StochasticDepth(p=1 - survival_prob)
         self.Pw1 = conv1x1_block(in_channels=in_channels,
                                 out_channels=in_channels,                                
                                 use_bn=False,
@@ -33,7 +35,8 @@ class FR_PDP_block(torch.nn.Module):
     def forward(self, x):
         residual = x
         x = self.Pw1(x)        
-        x = self.Dw(x)        
+        # x = self.Dw(x) 
+        x = self.stochastic_depth(x, self.Dw)
         x = self.Pw2(x)
         x = self.SE(x)
         if self.stride == 1 and self.in_channels == self.out_channels:
@@ -58,56 +61,17 @@ class Bottleneck(nn.Module):
         out = self.bn2(self.conv2(out))
         return out
 
-class BottleneckSE_Post(torch.nn.Module):
-    def __init__(self, in_channels, expansion_factor, out_channels, stride=1, se_ratio=16):
-        """
-        :param in_channels: Số channel đầu vào (ví dụ 512).
-        :param expansion_factor: Hệ số mở rộng (ví dụ: 0.5).
-        :param out_channels: Số channel đầu ra (ví dụ: 128).
-        :param stride: Stride của depthwise convolution.
-        :param se_ratio: Hệ số giảm của SE block.
-        """
-        super(BottleneckSE_Post, self).__init__()
-        mid_channels = int(in_channels * expansion_factor)
-        # Mở rộng channel
-        self.expand = torch.nn.Sequential(
-            torch.nn.Conv2d(in_channels, mid_channels, kernel_size=1, bias=False),
-            torch.nn.BatchNorm2d(mid_channels),
-            torch.nn.ReLU(inplace=True)
-        )
-        # Depthwise convolution
-        self.depthwise = torch.nn.Sequential(
-            torch.nn.Conv2d(mid_channels, mid_channels, kernel_size=3, stride=stride,
-                            padding=1, groups=mid_channels, bias=False),
-            torch.nn.BatchNorm2d(mid_channels),
-            torch.nn.ReLU(inplace=True)
-        )
-        # Giảm số channel
-        self.project = torch.nn.Sequential(
-            torch.nn.Conv2d(mid_channels, out_channels, kernel_size=1, bias=False),
-            torch.nn.BatchNorm2d(out_channels)
-        )
-        # Shortcut branch
-        self.use_shortcut = (stride == 1 and in_channels == out_channels)
-        if not self.use_shortcut:
-            self.shortcut = torch.nn.Sequential(
-                torch.nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=stride, bias=False),
-                torch.nn.BatchNorm2d(out_channels)
-            )
-        # Áp dụng SE block sau khi cộng shortcut
-        self.se = SE(out_channels, se_ratio)
-        
-    def forward(self, x):
-        identity = x
-        out = self.expand(x)
-        out = self.depthwise(out)
-        out = self.project(out)
-        if self.use_shortcut:
-            out += identity
+class StochasticDepth(torch.nn.Module):
+    def __init__(self, p=0.5):
+        super().__init__()
+        self.p = p 
+
+    def forward(self, x, layer):
+        if self.training and torch.rand(1) < self.p:
+            return x  
         else:
-            out += self.shortcut(identity)
-        out = self.se(out)
-        return out
+            return layer(x)
+
         
 class TickNet(torch.nn.Module):
     """
