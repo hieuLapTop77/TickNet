@@ -13,7 +13,7 @@ class FR_PDP_block(torch.nn.Module):
     def __init__(self,
                  in_channels,
                  out_channels,
-                 stride, survival_prob=0.8, use_bottleneck=False)):
+                 stride, survival_prob=0.8, use_bottleneck=False):
         super().__init__()
         self.survival_prob = survival_prob
         self.stochastic_depth = StochasticDepth(p=1 - survival_prob)
