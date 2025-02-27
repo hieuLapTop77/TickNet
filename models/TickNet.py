@@ -34,8 +34,7 @@ class FR_PDP_block(torch.nn.Module):
     def forward(self, x):
         residual = x
         x = self.Pw1(x)        
-        # x = self.Dw(x) 
-        x = self.stochastic_depth(x, self.Dw)
+        x = self.Dw(x) 
         x = self.Pw2(x)
         x = self.SE(x)
         if self.stride == 1 and self.in_channels == self.out_channels:
