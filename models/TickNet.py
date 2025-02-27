@@ -112,7 +112,7 @@ class TickNet(torch.nn.Module):
             for unit_id, unit_channels in enumerate(stage_channels):
                 stride = strides[stage_id] if unit_id == 0 else 1  
                 if in_channels == 512 and unit_channels == 128:
-                    stage.add_module("unit{}".format(unit_id + 1), SEBottleneckBlock(in_channels=512, out_channels=128, reduction=16))
+                    stage.add_module("unit{}".format(unit_id + 1), SEBottleneckBlock(in_channels=512, out_channels=128, bottleneck_channels=256, reduction=16))
                 else:
                     stage.add_module("unit{}".format(unit_id + 1), FR_PDP_block(in_channels=in_channels, out_channels=unit_channels, stride=stride))
                 in_channels = unit_channels
