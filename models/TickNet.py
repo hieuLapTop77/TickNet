@@ -15,6 +15,7 @@ class FR_PDP_block(torch.nn.Module):
                  out_channels,
                  stride, survival_prob=0.8, use_bottleneck=False):
         super().__init__()
+        self.use_bottleneck = use_bottleneck
         self.survival_prob = survival_prob
         self.stochastic_depth = StochasticDepth(p=1 - survival_prob)
         self.Pw1 = conv1x1_block(in_channels=in_channels,
@@ -34,11 +35,10 @@ class FR_PDP_block(torch.nn.Module):
         self.SE = SE(out_channels, 16)
 
         if use_bottleneck:
-            self.bottleneck = Bottleneck(
-                in_channels=512,  
-                bottleneck_channels = 256,
-                out_channels=128
-            )
+            bottleneck_channels = 64  
+            self.bottleneck = Bottleneck(in_channels=512, 
+                                        bottleneck_channels=256,  
+                                        out_channels=128) 
     def forward(self, x):
         residual = x
         x = self.Pw1(x)        
