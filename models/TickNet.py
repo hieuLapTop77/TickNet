@@ -13,11 +13,8 @@ class FR_PDP_block(torch.nn.Module):
     def __init__(self,
                  in_channels,
                  out_channels,
-                 stride, survival_prob=0.8, use_bottleneck=False):
+                 stride):
         super().__init__()
-        self.use_bottleneck = use_bottleneck
-        self.survival_prob = survival_prob
-        self.stochastic_depth = StochasticDepth(p=1 - survival_prob)
         self.Pw1 = conv1x1_block(in_channels=in_channels,
                                 out_channels=in_channels,                                
                                 use_bn=False,
@@ -34,11 +31,6 @@ class FR_PDP_block(torch.nn.Module):
         self.out_channels = out_channels
         self.SE = SE(out_channels, 16)
 
-        if use_bottleneck:
-            bottleneck_channels = 64  
-            self.bottleneck = Bottleneck(in_channels=512, 
-                                        bottleneck_channels=256,  
-                                        out_channels=128) 
     def forward(self, x):
         residual = x
         x = self.Pw1(x)        
@@ -49,10 +41,7 @@ class FR_PDP_block(torch.nn.Module):
         if self.stride == 1 and self.in_channels == self.out_channels:
             x = x + residual
         else:                     
-            if self.use_bottleneck and self.in_channels > self.out_channels:
-                residual = self.bottleneck(residual)
-            else:            
-                residual = self.PwR(residual)
+            residual = self.PwR(residual)
             x = x + residual
         return x
         
@@ -71,16 +60,24 @@ class Bottleneck(nn.Module):
         out = self.bn2(self.conv2(out))
         return out
 
-class StochasticDepth(torch.nn.Module):
-    def __init__(self, p=0.5):
+class SEBottleneckBlock(torch.nn.Module):
+    def __init__(self, in_channels, out_channels, bottleneck_channels, reduction=16):
         super().__init__()
-        self.p = p 
+        self.conv1 = conv1x1_block(in_channels, bottleneck_channels, activation="relu")
+        self.conv2 = conv3x3_block(bottleneck_channels, bottleneck_channels, activation="relu")
+        self.conv3 = conv1x1_block(bottleneck_channels, out_channels, activation=None)
+        self.se = SE(out_channels, reduction)  # Thêm SE
+        self.shortcut = conv1x1_block(in_channels, out_channels, activation=None)
+        self.relu = torch.nn.ReLU(inplace=True)
 
-    def forward(self, x, layer):
-        if self.training and torch.rand(1) < self.p:
-            return x  
-        else:
-            return layer(x)
+    def forward(self, x):
+        residual = self.shortcut(x)
+        x = self.conv1(x)
+        x = self.conv2(x)
+        x = self.conv3(x)
+        x = self.se(x)  # Áp dụng attention
+        x = x + residual
+        return self.relu(x)
 
         
 class TickNet(torch.nn.Module):
@@ -115,8 +112,10 @@ class TickNet(torch.nn.Module):
             stage = torch.nn.Sequential()
             for unit_id, unit_channels in enumerate(stage_channels):
                 stride = strides[stage_id] if unit_id == 0 else 1  
-                use_bottleneck = in_channels > unit_channels * 2
-                stage.add_module("unit{}".format(unit_id + 1), FR_PDP_block(in_channels=in_channels, out_channels=unit_channels, stride=stride, survival_prob=0.8,use_bottleneck=use_bottleneck))
+                if in_channels == 512 and unit_channels == 128:
+                    stage.add_module("unit{}".format(unit_id + 1), SEBottleneckBlock(in_channels=512, out_channels=128, se_ratio=16))
+                else:
+                    stage.add_module("unit{}".format(unit_id + 1), FR_PDP_block(in_channels=in_channels, out_channels=unit_channels, stride=stride))
                 in_channels = unit_channels
             self.backbone.add_module("stage{}".format(stage_id + 1), stage)
         self.final_conv_channels = 1024        
