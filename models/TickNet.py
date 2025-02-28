@@ -45,40 +45,42 @@ class FR_PDP_block(torch.nn.Module):
             x = x + residual
         return x
         
-# class Bottleneck(nn.Module):
-#     def __init__(self, in_channels, bottleneck_channels, out_channels):
-#         super().__init__()
-#         self.conv1 = nn.Conv2d(in_channels, bottleneck_channels, kernel_size=1)
-#         self.bn1 = nn.BatchNorm2d(bottleneck_channels)
-#         self.relu = nn.ReLU(inplace=True)
-#         self.conv2 = nn.Conv2d(bottleneck_channels, out_channels, kernel_size=1)
-#         self.bn2 = nn.BatchNorm2d(out_channels)
+class Bottleneck(nn.Module):
+    def __init__(self, in_channels, bottleneck_channels, out_channels):
+        super().__init__()
+        self.conv1 = nn.Conv2d(in_channels, bottleneck_channels, kernel_size=1)
+        self.bn1 = nn.BatchNorm2d(bottleneck_channels)
+        self.relu = nn.ReLU(inplace=True)
+        self.conv2 = nn.Conv2d(bottleneck_channels, out_channels, kernel_size=1)
+        self.bn2 = nn.BatchNorm2d(out_channels)
 
-#     def forward(self, x):
-#         out = self.bn1(self.conv1(x))
-#         out = self.relu(out)
-#         out = self.bn2(self.conv2(out))
-#         return out
+    def forward(self, x):
+        out = self.bn1(self.conv1(x))
+        out = self.relu(out)
+        out = self.bn2(self.conv2(out))
+        return out
 
 # 63.37 tot nhat hien tai
-# class SEBottleneckBlock(torch.nn.Module):
-#     def __init__(self, in_channels, out_channels, bottleneck_channels, reduction=16):
-#         super().__init__()
-#         self.conv1 = conv1x1_block(in_channels, bottleneck_channels, activation="relu")
-#         self.conv2 = conv3x3_block(bottleneck_channels, bottleneck_channels, activation="relu")
-#         self.conv3 = conv1x1_block(bottleneck_channels, out_channels, activation=None)
-#         self.se = SE(out_channels, reduction)  # Thêm SE
-#         self.shortcut = conv1x1_block(in_channels, out_channels, activation=None)
-#         self.relu = torch.nn.ReLU(inplace=True)
 
-#     def forward(self, x):
-#         residual = self.shortcut(x)
-#         x = self.conv1(x)
-#         x = self.conv2(x)
-#         x = self.conv3(x)
-#         x = self.se(x)  # Áp dụng attention
-#         x = x + residual
-#         return self.relu(x)
+class SEBottleneckBlock(torch.nn.Module):
+    def __init__(self, in_channels, out_channels, bottleneck_channels):
+        super().__init__()
+        self.conv1 = conv1x1_block(in_channels, bottleneck_channels, activation="relu")
+        self.conv2 = conv3x3_block(bottleneck_channels, bottleneck_channels, activation="relu")
+        self.conv3 = conv1x1_block(bottleneck_channels, out_channels, activation=None)
+        reduction = max(4, out_channels // 16)
+        self.se = SE(out_channels, reduction)  # Thêm SE
+        self.shortcut = conv1x1_block(in_channels, out_channels, activation=None)
+        self.relu = torch.nn.ReLU(inplace=True)
+
+    def forward(self, x):
+        residual = self.shortcut(x)
+        x = self.conv1(x)
+        x = self.conv2(x)
+        x = self.conv3(x)
+        x = self.se(x)  # Áp dụng attention
+        x = x + residual
+        return self.relu(x)
 
         
 class TickNet(torch.nn.Module):
@@ -113,10 +115,10 @@ class TickNet(torch.nn.Module):
             stage = torch.nn.Sequential()
             for unit_id, unit_channels in enumerate(stage_channels):
                 stride = strides[stage_id] if unit_id == 0 else 1  
-                # if in_channels == 512 and unit_channels == 128:
-                #     stage.add_module("unit{}".format(unit_id + 1), SEBottleneckBlock(in_channels=512, out_channels=128, bottleneck_channels=256, reduction=16))
-                # else:
-                stage.add_module("unit{}".format(unit_id + 1), FR_PDP_block(in_channels=in_channels, out_channels=unit_channels, stride=stride))
+                if in_channels == 512 and unit_channels == 128:
+                    stage.add_module("unit{}".format(unit_id + 1), SEBottleneckBlock(in_channels=512, out_channels=128, bottleneck_channels=256))
+                else:
+                    stage.add_module("unit{}".format(unit_id + 1), FR_PDP_block(in_channels=in_channels, out_channels=unit_channels, stride=stride))
                 in_channels = unit_channels
             self.backbone.add_module("stage{}".format(stage_id + 1), stage)
         self.final_conv_channels = 1024        
