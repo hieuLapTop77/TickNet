@@ -63,7 +63,7 @@ class GhostModule(nn.Module):
         self.primary_conv = nn.Sequential(
             nn.Conv2d(in_channels, hidden_channels, 1, bias=False),
             nn.BatchNorm2d(hidden_channels),
-            nn.ReLU(inplace=True)
+            nn.ReLU(inplace=True))
         
         # Cheap Operation (Depthwise Conv)
         self.cheap_conv = nn.Sequential(
