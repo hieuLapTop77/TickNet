@@ -18,7 +18,7 @@ class FR_PDP_block(torch.nn.Module):
         self.use_bottleneck = use_bottleneck
 
         self.Pw1 = GhostModule(in_channels, in_channels)
-        self.Dw = DynamicConv2d(in_channels, in_channels, kernel_size=3)         
+        self.Dw = conv3x3_dw_blockAll(channels=in_channels, stride=stride)      
         self.Pw2 = conv1x1_block(in_channels=in_channels,
                                              out_channels=out_channels,                                             
                                              groups=1, use_bn=True, activation="relu")
