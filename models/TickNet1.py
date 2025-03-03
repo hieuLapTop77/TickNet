@@ -57,24 +57,86 @@ class GhostModule(nn.Module):
     def __init__(self, in_channels, out_channels, ratio=2, dw_size=3):
         super().__init__()
         self.ratio = ratio
+        self.out_channels = out_channels
         hidden_channels = out_channels // ratio
         
-        # Primary Conv
         self.primary_conv = nn.Sequential(
             nn.Conv2d(in_channels, hidden_channels, 1, bias=False),
             nn.BatchNorm2d(hidden_channels),
-            nn.ReLU(inplace=True))
+            nn.ReLU(inplace=True)
+        )
         
-        # Cheap Operation (Depthwise Conv)
         self.cheap_conv = nn.Sequential(
-            nn.Conv2d(hidden_channels, hidden_channels, dw_size, padding=dw_size//2, groups=hidden_channels, bias=False),
+            nn.Conv2d(hidden_channels, hidden_channels, dw_size, 
+                      padding=dw_size//2, groups=hidden_channels, bias=False),
             nn.BatchNorm2d(hidden_channels),
-            nn.ReLU(inplace=True))
+            nn.ReLU(inplace=True)
+        )
         
     def forward(self, x):
         x1 = self.primary_conv(x)
         x2 = self.cheap_conv(x1)
-        return torch.cat([x1, x2], dim=1)[:, :self.out_channels, :, :]  # Slice để đảm bảo output channels
+        out = torch.cat([x1, x2], dim=1)
+        return out[:, :self.out_channels, :, :]
+
+class EnhancedBlock(nn.Module):
+    def __init__(self, in_channels, out_channels, stride=1):
+        super().__init__()
+        self.conv = nn.Sequential(
+            GhostModule(in_channels, out_channels),
+            DynamicConv2d(out_channels, out_channels, 3),
+            nn.BatchNorm2d(out_channels),
+            Mish(),
+            TransformerBlock(out_channels)
+        )
+        self.shortcut = nn.Sequential()
+        if stride != 1 or in_channels != out_channels:
+            self.shortcut = nn.Sequential(
+                nn.Conv2d(in_channels, out_channels, 1, stride=stride),
+                nn.BatchNorm2d(out_channels)
+            )
+            
+    def forward(self, x):
+        return self.conv(x) + self.shortcut(x)
+        
+class TransformerBlock(nn.Module):
+    def __init__(self, dim, num_heads=4):
+        super().__init__()
+        self.norm1 = nn.LayerNorm(dim)
+        self.attn = nn.MultiheadAttention(dim, num_heads)
+        self.norm2 = nn.LayerNorm(dim)
+        self.mlp = nn.Sequential(
+            nn.Linear(dim, dim * 4),
+            Mish(),
+            nn.Linear(dim * 4, dim)
+        )
+        
+    def forward(self, x):
+        B, C, H, W = x.shape
+        x_flat = x.flatten(2).permute(2, 0, 1)
+        
+        # Self-attention
+        attn_out, _ = self.attn(x_flat, x_flat, x_flat)
+        attn_out = attn_out.permute(1, 2, 0).view(B, C, H, W)
+        x = x + attn_out
+        
+        # FFN
+        x = x + self.mlp(self.norm2(x.permute(0, 2, 3, 1)).permute(0, 3, 1, 2))
+        return x
+
+class DynamicConv2d(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size, num_bases=4):
+        super().__init__()
+        self.num_bases = num_bases
+        self.weight = nn.Parameter(torch.randn(num_bases, out_channels, in_channels, kernel_size, kernel_size))
+        self.attention = nn.Linear(in_channels, num_bases)
+        
+    def forward(self, x):
+        B, C, H, W = x.shape
+        attn_weights = F.softmax(self.attention(x.mean(dim=[2,3])), dim=-1)
+        combined_weight = torch.einsum('bk,koihw->boihw', attn_weights, self.weight)
+        return F.conv2d(x, combined_weight, padding=1)
+
 
 class Bottleneck(nn.Module):
     def __init__(self, in_channels, bottleneck_channels, out_channels):
