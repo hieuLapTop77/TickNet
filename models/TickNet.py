@@ -19,7 +19,7 @@ class FR_PDP_block(torch.nn.Module):
                                 out_channels=in_channels,                                
                                 use_bn=True,
                                 activation='relu')
-        self.Dw = conv3x3_dw_blockAll(channels=in_channels, stride=stride)         
+        self.Dw = DynamicConv2d(in_channels, in_channels, kernel_size=3)         
         self.Pw2 = conv1x1_block(in_channels=in_channels,
                                              out_channels=out_channels,                                             
                                              groups=1, use_bn=True, activation="relu")
@@ -81,8 +81,24 @@ class SEBottleneckBlock(torch.nn.Module):
         x = self.se(x)  # Áp dụng attention
         x = x + residual
         return self.relu(x)
-
         
+class DynamicConv2d(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size, num_bases=4):
+        super().__init__()
+        self.num_bases = num_bases
+        self.weight = nn.Parameter(torch.randn(num_bases, out_channels, in_channels, kernel_size, kernel_size))
+        self.attention = nn.Linear(in_channels, num_bases)
+    
+    def forward(self, x):
+        B, C, H, W = x.shape
+        # Tính attention weights
+        attn_weights = torch.softmax(self.attention(x.mean(dim=[2,3])), dim=-1)  # (B, num_bases)
+        # Tổ hợp trọng số
+        combined_weight = torch.einsum('bk,koihw->boihw', attn_weights, self.weight)
+        # Áp dụng Conv
+        output = torch.nn.functional.conv2d(x, combined_weight, padding=1)
+        return output
+  
 class TickNet(torch.nn.Module):
     """
     Class for constructing TickNet.    
