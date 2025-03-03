@@ -16,7 +16,7 @@ import torchvision.datasets
 #from pathlib import Path
 #sys.path.append(str(Path('.').absolute().parent))
 from models.datasets import *
-from models.TickNet import *
+from models.TickNet1 import *
 import writeLogAcc as wA
 
 def get_args():
