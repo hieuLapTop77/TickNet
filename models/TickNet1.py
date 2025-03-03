@@ -224,15 +224,18 @@ class TickNet(torch.nn.Module):
         self.init_params()
                      
     def init_params(self):
-        # backbone
-        for name, module in self.backbone.named_modules():
-            if isinstance(module, torch.nn.Conv2d):
-                torch.nn.init.kaiming_uniform_(module.weight)
-                if module.bias is not None:
-                    torch.nn.init.constant_(module.bias, 0)
-
-        # classifier
-        self.classifier.init_params()
+        # Khởi tạo tham số cho tất cả các layer
+        for m in self.modules():
+            if isinstance(m, torch.nn.Conv2d):
+                torch.nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+                if m.bias is not None:
+                    torch.nn.init.constant_(m.bias, 0)
+            elif isinstance(m, torch.nn.BatchNorm2d):
+                torch.nn.init.constant_(m.weight, 1)
+                torch.nn.init.constant_(m.bias, 0)
+            elif isinstance(m, torch.nn.Linear):
+                torch.nn.init.normal_(m.weight, 0, 0.01)
+                torch.nn.init.constant_(m.bias, 0)
 
     def forward(self, x):
         x = self.backbone(x)
