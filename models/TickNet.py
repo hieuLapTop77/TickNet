@@ -13,8 +13,9 @@ class FR_PDP_block(torch.nn.Module):
     def __init__(self,
                  in_channels,
                  out_channels,
-                 stride):
+                 stride, use_bottleneck=False):
         super().__init__()
+        self.use_bottleneck = use_bottleneck
         self.Pw1 = conv1x1_block(in_channels=in_channels,
                                 out_channels=in_channels,                                
                                 use_bn=True,
@@ -29,8 +30,14 @@ class FR_PDP_block(torch.nn.Module):
         self.stride = stride
         self.in_channels = in_channels
         self.out_channels = out_channels
-        reduction = max(4, out_channels // 16)
-        self.SE = SE(out_channels, reduction)
+        # reduction = max(4, out_channels // 16)
+        # self.SE = SE(out_channels, reduction)
+        self.SE = SE(out_channels, 16)
+        if use_bottleneck:
+            bottleneck_channels = 64  
+            self.bottleneck = Bottleneck(in_channels=512, 
+                                        bottleneck_channels=64,  
+                                        out_channels=128) 
 
     def forward(self, x):
         residual = x
@@ -40,8 +47,11 @@ class FR_PDP_block(torch.nn.Module):
         x = self.SE(x)
         if self.stride == 1 and self.in_channels == self.out_channels:
             x = x + residual
-        else:                     
-            residual = self.PwR(residual)
+        else:            
+            if self.use_bottleneck and self.in_channels > self.out_channels:
+                residual = self.bottleneck(residual)
+            else:            
+                residual = self.PwR(residual)
             x = x + residual
         return x
         
@@ -130,11 +140,12 @@ class TickNet(torch.nn.Module):
         for stage_id, stage_channels in enumerate(channels):
             stage = torch.nn.Sequential()
             for unit_id, unit_channels in enumerate(stage_channels):
-                stride = strides[stage_id] if unit_id == 0 else 1  
-                if in_channels == 512 and unit_channels == 128:
-                    stage.add_module("unit{}".format(unit_id + 1), SEBottleneckBlock(in_channels=512, out_channels=128, bottleneck_channels=256))
-                else:
-                    stage.add_module("unit{}".format(unit_id + 1), FR_PDP_block(in_channels=in_channels, out_channels=unit_channels, stride=stride))
+                stride = strides[stage_id] if unit_id == 0 else 1 
+                use_bottleneck = in_channels > unit_channels * 2
+                # if in_channels == 512 and unit_channels == 128:
+                #     stage.add_module("unit{}".format(unit_id + 1), SEBottleneckBlock(in_channels=512, out_channels=128, bottleneck_channels=256))
+                # else:
+                stage.add_module("unit{}".format(unit_id + 1), FR_PDP_block(in_channels=in_channels, out_channels=unit_channels, stride=stride, use_bottleneck=use_bottleneck))
                 in_channels = unit_channels
             self.backbone.add_module("stage{}".format(stage_id + 1), stage)
         self.final_conv_channels = 1024        
@@ -149,24 +160,39 @@ class TickNet(torch.nn.Module):
         )
         self.init_params()
 
+    # def init_params(self):
+    #     # backbone
+    #     for name, module in self.backbone.named_modules():
+    #         if isinstance(module, torch.nn.Conv2d):
+    #             # torch.nn.init.kaiming_uniform_(module.weight)
+    #             torch.nn.init.kaiming_uniform_(module.weight, mode='fan_out', nonlinearity='relu')
+    #             if module.bias is not None:
+    #                 torch.nn.init.constant_(module.bias, 0)
+    #         elif isinstance(module, nn.BatchNorm2d):
+    #             torch.nn.init.constant_(module.weight, 1)
+    #             torch.nn.init.constant_(module.bias, 0)
+    #     # classifier
+    #     # self.classifier.init_params()
+    #     for module in self.classifier.modules():
+    #         if isinstance(module, nn.Linear):
+    #             init.kaiming_uniform_(module.weight, mode='fan_out', nonlinearity='relu')
+    #             if module.bias is not None:
+    #                 init.constant_(module.bias, 0)
+
+    # def forward(self, x):
+    #     x = self.backbone(x)
+    #     x = self.classifier(x)
+    #     return x
     def init_params(self):
         # backbone
         for name, module in self.backbone.named_modules():
             if isinstance(module, torch.nn.Conv2d):
-                # torch.nn.init.kaiming_uniform_(module.weight)
-                torch.nn.init.kaiming_uniform_(module.weight, mode='fan_out', nonlinearity='relu')
+                torch.nn.init.kaiming_uniform_(module.weight)
                 if module.bias is not None:
                     torch.nn.init.constant_(module.bias, 0)
-            elif isinstance(module, nn.BatchNorm2d):
-                torch.nn.init.constant_(module.weight, 1)
-                torch.nn.init.constant_(module.bias, 0)
+
         # classifier
-        # self.classifier.init_params()
-        for module in self.classifier.modules():
-            if isinstance(module, nn.Linear):
-                init.kaiming_uniform_(module.weight, mode='fan_out', nonlinearity='relu')
-                if module.bias is not None:
-                    init.constant_(module.bias, 0)
+        self.classifier.init_params()
 
     def forward(self, x):
         x = self.backbone(x)
