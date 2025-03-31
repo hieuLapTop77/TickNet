@@ -1,6 +1,6 @@
 import torch.nn as nn
 from .common import conv1x1_block, Classifier, conv3x3_dw_blockAll, conv3x3_block
-from .SE_ Attention import SE
+from .SE_Attention import SE
 
 class FR_PDP_block(nn.Module):
     def __init__(self,
