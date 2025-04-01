@@ -19,19 +19,22 @@ class FR_PDP_block(nn.Module):
         self.Pw2 = conv1x1_block(in_channels=in_channels,
                                  out_channels=out_channels,
                                  groups=1)
-        self.PwR = conv1x1_block(in_channels=in_channels,
-                                 out_channels=out_channels,
-                                 stride=stride)
         self.stride = stride
         self.in_channels = in_channels
         self.out_channels = out_channels
+                     
         self.SE = SE(out_channels, 16)
-
-        if use_bottleneck:
-            bottleneck_channels = 256
-            self.bottleneck = Bottleneck(in_channels=self.in_channels,
-                                        bottleneck_channels=bottleneck_channels,
-                                        out_channels=self.out_channels)
+        self.PwR = conv1x1_block(in_channels=in_channels,
+                         out_channels=out_channels,
+                         stride=stride)
+        # Bottleneck Skip Connection (BSC)
+        self.use_bottleneck = use_bottleneck and (in_channels > out_channels * 2)
+        if self.use_bottleneck:
+            bottleneck_channels = 256  # Theo đề xuất 512 -> 256 -> 128
+            self.bsc = Bottleneck(in_channels=in_channels,
+                                  bottleneck_channels=bottleneck_channels,
+                                  out_channels=out_channels,
+                                  stride=stride)
 
     def forward(self, x):
         residual = x
@@ -39,29 +42,37 @@ class FR_PDP_block(nn.Module):
         x = self.Dw(x)
         x = self.Pw2(x)
         x = self.SE(x)
+        
+        # Skip connection path
         if self.stride == 1 and self.in_channels == self.out_channels:
-            x = x + residual
+            # Identity mapping
+            pass
         else:
-            if self.use_bottleneck and self.in_channels > self.out_channels:
-                residual = self.bottleneck(residual)
+            if self.use_bottleneck:
+                residual = self.bsc(residual)  # Áp dụng BSC
             else:
-                residual = self.PwR(residual)
-            x = x + residual
+                residual = self.PwR(residual)  # Áp dụng PwR thông thường
+        
+        x = x + residual
         return x
 
 class Bottleneck(nn.Module):
-    def __init__(self, in_channels, bottleneck_channels, out_channels):
+    def __init__(self, in_channels, bottleneck_channels, out_channels, stride=1):
         super().__init__()
-        self.conv1 = nn.Conv2d(in_channels, bottleneck_channels, kernel_size=1)
+        # First 1x1 conv: giảm kênh và xử lý stride nếu cần
+        self.conv1 = nn.Conv2d(in_channels, bottleneck_channels, kernel_size=1, stride=stride)
         self.bn1 = nn.BatchNorm2d(bottleneck_channels)
         self.relu = nn.ReLU(inplace=True)
-        self.conv2 = nn.Conv2d(bottleneck_channels, out_channels, kernel_size=1)
+        # Second 1x1 conv: giảm tiếp xuống out_channels
+        self.conv2 = nn.Conv2d(bottleneck_channels, out_channels, kernel_size=1, stride=1)
         self.bn2 = nn.BatchNorm2d(out_channels)
 
     def forward(self, x):
-        out = self.bn1(self.conv1(x))
+        out = self.conv1(x)
+        out = self.bn1(out)
         out = self.relu(out)
-        out = self.bn2(self.conv2(out))
+        out = self.conv2(out)
+        out = self.bn2(out)
         return out
 
 class TickNet(nn.Module):
