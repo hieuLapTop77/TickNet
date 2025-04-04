@@ -1,7 +1,11 @@
 import torch.nn as nn
 from .common import conv1x1_block, Classifier, conv3x3_dw_blockAll, conv3x3_block
 from .SE_Attention import SE
+import re
+import types
 
+import torch.nn
+import torch.nn.init
 class FR_PDP_block(torch.nn.Module):
     """
     FR_PDP_block for TickNet.
