@@ -82,7 +82,7 @@ class TickNet(nn.Module):
                 stage.add_module("unit{}".format(unit_id + 1), FR_PDP_block(in_channels=in_channels, out_channels=unit_channels, stride=stride))
                 use_bottleneck = in_channels > unit_channels * 2
                 if use_bottleneck:
-                    stage.add_module("Bottleneck{}".format(unit_id + 1), Bottleneck(in_channels=512, out_channels=128, stride=stride))
+                    stage.add_module("Bottleneck{}".format(unit_id + 1), Bottleneck(in_channels=512, bottleneck_channels=256, out_channels=128, stride=stride))
                 in_channels = unit_channels
             self.backbone.add_module("stage{}".format(stage_id + 1), stage)
 
