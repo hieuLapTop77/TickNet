@@ -2,7 +2,10 @@ import torch.nn as nn
 from .common import conv1x1_block, Classifier, conv3x3_dw_blockAll, conv3x3_block
 from .SE_Attention import SE
 
-class FR_PDP_block(nn.Module):
+class FR_PDP_block(torch.nn.Module):
+    """
+    FR_PDP_block for TickNet.
+    """
     def __init__(self,
                  in_channels,
                  out_channels,
@@ -44,14 +47,14 @@ class Bottleneck(nn.Module):
         self.bn1 = nn.BatchNorm2d(bottleneck_channels)
         self.relu = nn.ReLU(inplace=True)
         self.conv2 = nn.Conv2d(bottleneck_channels, out_channels, kernel_size=1, stride=1)
-        # self.bn2 = nn.BatchNorm2d(out_channels)
+        self.bn2 = nn.BatchNorm2d(out_channels)
 
     def forward(self, x):
         out = self.conv1(x)
         out = self.bn1(out)
         out = self.relu(out)
         out = self.conv2(out)
-        # out = self.bn2(out)
+        out = self.bn2(out)
         out = self.relu(out)
         return out
 
