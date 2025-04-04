@@ -30,7 +30,7 @@ class FR_PDP_block(nn.Module):
         # Bottleneck Skip Connection (BSC)
         self.use_bottleneck = use_bottleneck and (in_channels > out_channels * 2)
         if self.use_bottleneck:
-            bottleneck_channels = 256  # Theo đề xuất 512 -> 256 -> 128
+            bottleneck_channels = 256  
             self.bsc = Bottleneck(in_channels=in_channels,
                                   bottleneck_channels=bottleneck_channels,
                                   out_channels=out_channels,
@@ -49,9 +49,9 @@ class FR_PDP_block(nn.Module):
             pass
         else:
             if self.use_bottleneck:
-                residual = self.bsc(residual)  # Áp dụng BSC
+                residual = self.bsc(residual)  
             else:
-                residual = self.PwR(residual)  # Áp dụng PwR thông thường
+                residual = self.PwR(residual)  
         
         x = x + residual
         return x
@@ -59,11 +59,9 @@ class FR_PDP_block(nn.Module):
 class Bottleneck(nn.Module):
     def __init__(self, in_channels, bottleneck_channels, out_channels, stride=1):
         super().__init__()
-        # First 1x1 conv: giảm kênh và xử lý stride nếu cần
         self.conv1 = nn.Conv2d(in_channels, bottleneck_channels, kernel_size=1, stride=stride)
         self.bn1 = nn.BatchNorm2d(bottleneck_channels)
         self.relu = nn.ReLU(inplace=True)
-        # Second 1x1 conv: giảm tiếp xuống out_channels
         self.conv2 = nn.Conv2d(bottleneck_channels, out_channels, kernel_size=1, stride=1)
         self.bn2 = nn.BatchNorm2d(out_channels)
 
