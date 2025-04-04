@@ -6,55 +6,36 @@ class FR_PDP_block(nn.Module):
     def __init__(self,
                  in_channels,
                  out_channels,
-                 stride,
-                 use_bottleneck=False):
+                 stride):
         super().__init__()
-
-        self.use_bottleneck = use_bottleneck
         self.Pw1 = conv1x1_block(in_channels=in_channels,
-                                 out_channels=in_channels,
-                                 use_bn=False,
-                                 activation=None)
-        self.Dw = conv3x3_dw_blockAll(channels=in_channels, stride=stride)
+                                out_channels=in_channels,                                
+                                use_bn=False,
+                                activation=None)
+        self.Dw = conv3x3_dw_blockAll(channels=in_channels, stride=stride)         
         self.Pw2 = conv1x1_block(in_channels=in_channels,
-                                 out_channels=out_channels,
-                                 groups=1)
+                                             out_channels=out_channels,                                             
+                                             groups=1)
+        self.PwR = conv1x1_block(in_channels=in_channels,
+                                out_channels=out_channels,
+                                stride=stride)
         self.stride = stride
         self.in_channels = in_channels
         self.out_channels = out_channels
-                     
         self.SE = SE(out_channels, 16)
-        self.PwR = conv1x1_block(in_channels=in_channels,
-                         out_channels=out_channels,
-                         stride=stride)
-        # Bottleneck Skip Connection (BSC)
-        self.use_bottleneck = use_bottleneck and (in_channels > out_channels * 2)
-        if self.use_bottleneck:
-            bottleneck_channels = 256  
-            self.bsc = Bottleneck(in_channels=in_channels,
-                                  bottleneck_channels=bottleneck_channels,
-                                  out_channels=out_channels,
-                                  stride=stride)
-
     def forward(self, x):
         residual = x
-        x = self.Pw1(x)
-        x = self.Dw(x)
+        x = self.Pw1(x)        
+        x = self.Dw(x)        
         x = self.Pw2(x)
         x = self.SE(x)
-        
-        # Skip connection path
         if self.stride == 1 and self.in_channels == self.out_channels:
-            # Identity mapping
-            pass
-        else:
-            if self.use_bottleneck:
-                residual = self.bsc(residual)  
-            else:
-                residual = self.PwR(residual)  
-        
-        x = x + residual
+            x = x + residual
+        else:            
+            residual = self.PwR(residual)
+            x = x + residual
         return x
+
 
 class Bottleneck(nn.Module):
     def __init__(self, in_channels, bottleneck_channels, out_channels, stride=1):
@@ -63,14 +44,15 @@ class Bottleneck(nn.Module):
         self.bn1 = nn.BatchNorm2d(bottleneck_channels)
         self.relu = nn.ReLU(inplace=True)
         self.conv2 = nn.Conv2d(bottleneck_channels, out_channels, kernel_size=1, stride=1)
-        self.bn2 = nn.BatchNorm2d(out_channels)
+        # self.bn2 = nn.BatchNorm2d(out_channels)
 
     def forward(self, x):
         out = self.conv1(x)
         out = self.bn1(out)
         out = self.relu(out)
         out = self.conv2(out)
-        out = self.bn2(out)
+        # out = self.bn2(out)
+        out = self.relu(out)
         return out
 
 class TickNet(nn.Module):
@@ -97,8 +79,10 @@ class TickNet(nn.Module):
             stage = nn.Sequential()
             for unit_id, unit_channels in enumerate(stage_channels):
                 stride = strides[stage_id] if unit_id == 0 else 1
-                use_bottleneck = in_channels > unit_channels * 2
                 stage.add_module("unit{}".format(unit_id + 1), FR_PDP_block(in_channels=in_channels, out_channels=unit_channels, stride=stride, use_bottleneck=use_bottleneck))
+                use_bottleneck = in_channels > unit_channels * 2
+                if use_bottleneck:
+                    stage.add_module("Bottleneck{}".format(unit_id + 1), Bottleneck(in_channels=512, out_channels=128, stride=stride))
                 in_channels = unit_channels
             self.backbone.add_module("stage{}".format(stage_id + 1), stage)
 
