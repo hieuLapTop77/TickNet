@@ -45,21 +45,71 @@ class FR_PDP_block(torch.nn.Module):
 
 
 class Bottleneck(nn.Module):
+    """
+    Bottleneck Block chuẩn theo ResNet.
+    Cấu trúc: 1x1 Conv -> BN -> ReLU -> 3x3 Conv -> BN -> ReLU -> 1x1 Conv -> BN
+    Sau đó cộng với kết nối tắt (residual/shortcut) rồi qua ReLU cuối cùng.
+    """
+
     def __init__(self, in_channels, bottleneck_channels, out_channels, stride=1):
         super().__init__()
-        self.conv1 = nn.Conv2d(in_channels, bottleneck_channels, kernel_size=1, stride=stride)
+        self.stride = stride
+        self.in_channels = in_channels
+        self.out_channels = out_channels # Lưu lại để dùng trong downsample
+
+        # Lớp Conv 1x1 đầu tiên: Giảm số kênh, áp dụng stride nếu có
+        self.conv1 = nn.Conv2d(in_channels, bottleneck_channels, kernel_size=1, stride=stride, bias=False)
         self.bn1 = nn.BatchNorm2d(bottleneck_channels)
+
+        # Lớp Conv 3x3: Xử lý chính, padding=1 để giữ nguyên kích thước không gian (nếu stride=1)
+        self.conv2 = nn.Conv2d(bottleneck_channels, bottleneck_channels, kernel_size=3, stride=1, padding=1, bias=False)
+        self.bn2 = nn.BatchNorm2d(bottleneck_channels)
+
+        # Lớp Conv 1x1 cuối cùng: Khôi phục/tăng số kênh
+        self.conv3 = nn.Conv2d(bottleneck_channels, out_channels, kernel_size=1, stride=1, bias=False)
+        self.bn3 = nn.BatchNorm2d(out_channels)
+
         self.relu = nn.ReLU(inplace=True)
-        self.conv2 = nn.Conv2d(bottleneck_channels, out_channels, kernel_size=1, stride=1)
-        self.bn2 = nn.BatchNorm2d(out_channels)
+
+        # Kết nối tắt (Shortcut/Residual Connection)
+        # Cần downsample nếu stride > 1 hoặc số kênh đầu vào và đầu ra khác nhau
+        self.downsample = None
+        if stride != 1 or in_channels != out_channels:
+            # Sử dụng Conv 1x1 với stride tương ứng để chỉnh kích thước và số kênh
+            self.downsample = nn.Sequential(OrderedDict([
+                ('conv', nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=stride, bias=False)),
+                ('bn', nn.BatchNorm2d(out_channels))
+            ]))
+            print(f"Bottleneck: Adding downsample layer for in={in_channels}, out={out_channels}, stride={stride}")
+
 
     def forward(self, x):
+        # Lưu lại đầu vào cho kết nối tắt
+        residual = x
+
+        # Nhánh chính
         out = self.conv1(x)
         out = self.bn1(out)
         out = self.relu(out)
+
         out = self.conv2(out)
         out = self.bn2(out)
         out = self.relu(out)
+
+        out = self.conv3(out)
+        out = self.bn3(out) # BN cuối cùng trước khi cộng residual
+
+        # Xử lý kết nối tắt
+        if self.downsample is not None:
+            residual = self.downsample(x)
+            print(f"Bottleneck forward: Using downsample. Residual shape: {residual.shape}, Out shape before add: {out.shape}")
+        else:
+            print(f"Bottleneck forward: No downsample needed. Residual shape: {residual.shape}, Out shape before add: {out.shape}")
+        out += residual
+
+        # ReLU cuối cùng sau khi cộng
+        out = self.relu(out)
+
         return out
 
 class TickNet(nn.Module):
