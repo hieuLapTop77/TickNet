@@ -42,7 +42,24 @@ class FR_PDP_block(torch.nn.Module):
             residual = self.PwR(residual)
             x = x + residual
         return x
-
+        
+class Bottleneck(nn.Module):
+     def __init__(self, in_channels, bottleneck_channels, out_channels, stride=1):
+         super().__init__()
+         self.conv1 = nn.Conv2d(in_channels, bottleneck_channels, kernel_size=1, stride=stride)
+         self.bn1 = nn.BatchNorm2d(bottleneck_channels)
+         self.relu = nn.ReLU(inplace=True)
+         self.conv2 = nn.Conv2d(bottleneck_channels, out_channels, kernel_size=1, stride=1)
+         # self.bn2 = nn.BatchNorm2d(out_channels)
+ 
+     def forward(self, x):
+         out = self.conv1(x)
+         out = self.bn1(out)
+         out = self.relu(out)
+         out = self.conv2(out)
+         # out = self.bn2(out)
+         out = self.relu(out)
+         return out
 class TickNet(torch.nn.Module):
     """
     Class for constructing TickNet.    
@@ -74,8 +91,11 @@ class TickNet(torch.nn.Module):
         for stage_id, stage_channels in enumerate(channels):
             stage = torch.nn.Sequential()
             for unit_id, unit_channels in enumerate(stage_channels):
-                stride = strides[stage_id] if unit_id == 0 else 1                
-                stage.add_module("unit{}".format(unit_id + 1), FR_PDP_block(in_channels=in_channels, out_channels=unit_channels, stride=stride))
+                stride = strides[stage_id] if unit_id == 0 else 1      
+                if in_channels == 512 and unit_channels == 128:
+                    stage.add_module("Bottleneck{}".format(unit_id + 1), Bottleneck(in_channels=512, bottleneck_channels=256, out_channels=128, stride=stride))
+                else:
+                    stage.add_module("unit{}".format(unit_id + 1), FR_PDP_block(in_channels=in_channels, out_channels=unit_channels, stride=stride))
                 in_channels = unit_channels
             self.backbone.add_module("stage{}".format(stage_id + 1), stage)
         self.final_conv_channels = 1024        
