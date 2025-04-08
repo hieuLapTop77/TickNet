@@ -32,9 +32,10 @@ def get_args():
     parser.add_argument('-j', '--workers', default=4, type=int, help='Number of data loading workers.')
     parser.add_argument('-b', '--batch-size', default=64, type=int, help='Batch size.')        
     parser.add_argument('-e', '--epochs', default=200, type=int, help='Number of total epochs to run.')
-    parser.add_argument('-l', '--learning-rate', default=0.001, type=float, help='Initial learning rate.')
+    parser.add_argument('-l', '--learning-rate', default=0.1, type=float, help='Initial learning rate.')
     parser.add_argument('-s', '--schedule', nargs='+', default=[100, 150, 180], type=int, help='Learning rate schedule (epochs after which the learning rate should be dropped).')    
-    parser.add_argument('-w', '--weight-decay', default=0.01, type=float, help='AdamW weight decay.')    
+    parser.add_argument('-m', '--momentum', default=0.9, type=float, help='SGD momentum.')
+    parser.add_argument('-w', '--weight-decay', default=1e-4, type=float, help='SGD weight decay.')    
     parser.add_argument('--evaluate', dest='evaluate', action='store_true',
                         help='evaluate model on validation set')
     return parser.parse_args()
@@ -138,7 +139,7 @@ def run_epoch(train, data_loader, model, criterion, optimizer, n_epoch, args, de
         acc = calculate_accuracy(output, target)
         accs.append(acc)
 
-        # compute gradient and do optimizer step
+        # compute gradient and do SGD step
         if train:
             optimizer.zero_grad()
             loss.backward()
@@ -183,8 +184,8 @@ def main():
     
         # define loss function and optimizer
         criterion = torch.nn.CrossEntropyLoss().to(device)
-        # Changed from SGD to AdamW
-        optimizer = torch.optim.AdamW(params=model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
+        # optimizer = torch.optim.SGD(params=model.parameters(), lr=args.learning_rate, momentum=args.momentum, weight_decay=args.weight_decay)
+        optimizer = torch.optim.AdamW(params=model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay, betas=(0.9, 0.999), eps=1e-8)
         scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer=optimizer, milestones=args.schedule, gamma=0.1)
         
         # get train and val data loaders
