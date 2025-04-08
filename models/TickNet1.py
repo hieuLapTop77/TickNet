@@ -47,72 +47,108 @@ class FR_PDP_block(torch.nn.Module):
 
 class Bottleneck(nn.Module):
     """
-    Bottleneck Block chuẩn theo ResNet.
-    Cấu trúc: 1x1 Conv -> BN -> ReLU -> 3x3 Conv -> BN -> ReLU -> 1x1 Conv -> BN
-    Sau đó cộng với kết nối tắt (residual/shortcut) rồi qua ReLU cuối cùng.
+    Bottleneck Block với Depthwise Separable Convolution thay cho Conv 3x3 chuẩn.
+    Cấu trúc:
+    1. Conv 1x1 (giảm kênh) + BN + ReLU
+    2. Depthwise Conv 3x3 + BN + ReLU
+    3. Pointwise Conv 1x1 + BN
+    4. Cộng với kết nối tắt (residual/shortcut)
+    5. ReLU cuối cùng
     """
-
     def __init__(self, in_channels, bottleneck_channels, out_channels, stride=1):
         super().__init__()
         self.stride = stride
         self.in_channels = in_channels
         self.out_channels = out_channels # Lưu lại để dùng trong downsample
 
-        # Lớp Conv 1x1 đầu tiên: Giảm số kênh, áp dụng stride nếu có
+        # --- Nhánh chính ---
+        # 1. Lớp Conv 1x1 đầu tiên: Giảm số kênh, áp dụng stride nếu có
         self.conv1 = nn.Conv2d(in_channels, bottleneck_channels, kernel_size=1, stride=stride, bias=False)
         self.bn1 = nn.BatchNorm2d(bottleneck_channels)
+        self.relu1 = nn.ReLU(inplace=True) # Đặt tên riêng cho ReLU
 
-        # Lớp Conv 3x3: Xử lý chính, padding=1 để giữ nguyên kích thước không gian (nếu stride=1)
-        self.conv2 = nn.Conv2d(bottleneck_channels, bottleneck_channels, kernel_size=3, stride=1, padding=1, bias=False)
+        # 2. Depthwise Separable Convolution (thay thế cho Conv 3x3 chuẩn)
+        # 2a. Depthwise Conv 3x3
+        self.dw_conv2 = nn.Conv2d(
+            bottleneck_channels,
+            bottleneck_channels, # out_channels = in_channels
+            kernel_size=3,
+            stride=1, # Stride thường áp dụng ở conv1 hoặc downsample
+            padding=1,
+            groups=bottleneck_channels, # Điểm mấu chốt của depthwise conv
+            bias=False
+        )
         self.bn2 = nn.BatchNorm2d(bottleneck_channels)
+        self.relu2 = nn.ReLU(inplace=True) # Đặt tên riêng
 
-        # Lớp Conv 1x1 cuối cùng: Khôi phục/tăng số kênh
-        self.conv3 = nn.Conv2d(bottleneck_channels, out_channels, kernel_size=1, stride=1, bias=False)
-        self.bn3 = nn.BatchNorm2d(out_channels)
+        # 2b. Pointwise Conv 1x1 (sau depthwise)
+        self.pw_conv2 = nn.Conv2d(
+            bottleneck_channels,
+            bottleneck_channels, # Output channels của bước này vẫn là bottleneck_channels
+            kernel_size=1,
+            stride=1,
+            bias=False
+        )
+        self.bn3 = nn.BatchNorm2d(bottleneck_channels) # BN sau pointwise conv
+        self.relu3 = nn.ReLU(inplace=True) # ReLU sau pointwise conv + BN
 
-        self.relu = nn.ReLU(inplace=True)
+        # 3. Lớp Conv 1x1 cuối cùng: Khôi phục/tăng số kênh lên out_channels
+        #    Đầu vào là bottleneck_channels (từ pointwise conv)
+        self.conv4 = nn.Conv2d(bottleneck_channels, out_channels, kernel_size=1, stride=1, bias=False)
+        self.bn4 = nn.BatchNorm2d(out_channels) # BN cuối cùng của nhánh chính
 
-        # Kết nối tắt (Shortcut/Residual Connection)
-        # Cần downsample nếu stride > 1 hoặc số kênh đầu vào và đầu ra khác nhau
+        # --- Kết nối tắt (Shortcut/Residual Connection) ---
         self.downsample = None
         if stride != 1 or in_channels != out_channels:
-            # Sử dụng Conv 1x1 với stride tương ứng để chỉnh kích thước và số kênh
             self.downsample = nn.Sequential(OrderedDict([
                 ('conv', nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=stride, bias=False)),
                 ('bn', nn.BatchNorm2d(out_channels))
             ]))
-            print(f"Bottleneck: Adding downsample layer for in={in_channels}, out={out_channels}, stride={stride}")
+
+        # ReLU cuối cùng (sau khi cộng residual)
+        self.relu_final = nn.ReLU(inplace=True)
+
+        # In thông tin tham số (chỉ để debug, có thể xóa)
+        # params_dw = sum(p.numel() for p in self.dw_conv2.parameters())
+        # params_pw = sum(p.numel() for p in self.pw_conv2.parameters())
+        # print(f"BottleneckDW: DWConv params={params_dw}, PWConv params={params_pw}, Total DW+PW={params_dw+params_pw}")
 
 
     def forward(self, x):
-        # Lưu lại đầu vào cho kết nối tắt
         residual = x
 
         # Nhánh chính
+        # 1. Conv 1x1
         out = self.conv1(x)
         out = self.bn1(out)
-        out = self.relu(out)
+        out = self.relu1(out)
 
-        out = self.conv2(out)
+        # 2. Depthwise Separable Conv
+        # 2a. Depthwise 3x3
+        out = self.dw_conv2(out)
         out = self.bn2(out)
-        out = self.relu(out)
+        out = self.relu2(out)
+        # 2b. Pointwise 1x1
+        out = self.pw_conv2(out)
+        out = self.bn3(out)
+        out = self.relu3(out) # Có thể bỏ ReLU ở đây nếu muốn giống một số cấu trúc khác
 
-        out = self.conv3(out)
-        out = self.bn3(out) # BN cuối cùng trước khi cộng residual
+        # 3. Conv 1x1 cuối
+        out = self.conv4(out)
+        out = self.bn4(out) # BN cuối cùng trước khi cộng
 
         # Xử lý kết nối tắt
         if self.downsample is not None:
             residual = self.downsample(x)
-            print(f"Bottleneck forward: Using downsample. Residual shape: {residual.shape}, Out shape before add: {out.shape}")
-        else:
-            print(f"Bottleneck forward: No downsample needed. Residual shape: {residual.shape}, Out shape before add: {out.shape}")
+
+        # Cộng kết nối tắt
         out += residual
 
-        # ReLU cuối cùng sau khi cộng
-        out = self.relu(out)
+        # ReLU cuối cùng
+        out = self.relu_final(out)
 
         return out
-
+        
 class TickNet(nn.Module):
     def __init__(self,
                  num_classes,
