@@ -12,7 +12,8 @@ import torch.optim.lr_scheduler
 import torch.utils.data
 import torchvision.transforms
 import torchvision.datasets
-
+from ptflops import get_model_complexity_info
+from torchsummary import summary
 #from pathlib import Path
 #sys.path.append(str(Path('.').absolute().parent))
 from models.datasets import *
@@ -180,6 +181,19 @@ def main():
         print(model)
         
         print('Number of model parameters: {}'.format(
+        sum([p.data.nelement() for p in model.parameters()])))
+
+        macs, params = get_model_complexity_info(model, (3, 224, 224), as_strings=True,
+                                       print_per_layer_stat=True, verbose=True,flops_units='GMac')
+        
+                                       #, flops_units='GMac')
+        print('{:<30}  {:<8}'.format('Computational complexity (MACs): ', macs))
+        macs1 = macs.split()
+        strmacs1=str(float(macs1[0])/2) + ' ' + macs1[1][0]
+        print('{:<30}  {:<8}'.format('Floating-point operations (FLOPs): ', strmacs1))
+        print('{:<30}  {:<8}'.format('Number of parameters: ', params))
+        
+        print('Number of model parameters (referred)): {}'.format(
         sum([p.data.nelement() for p in model.parameters()])))
     
         # define loss function and optimizer
